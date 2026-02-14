@@ -213,7 +213,7 @@ class NijiDiaryLoggerPlugin(Star):
             except Exception as e:
                 logger.error(f"调度器错误: {e}")
 
-    # ========== 指令与事件监听 ==========
+    # ========== 指令与事件监听（修改兼容版本）=========
     @filter.command("login")
     async def login_command(self, event: AstrMessageEvent, username: str, password: str):
         user_id = event.get_sender_id()
@@ -232,17 +232,23 @@ class NijiDiaryLoggerPlugin(Star):
             return
         text = self._extract_plain_text(event.get_message())
         self._append_to_buffer(user_id, "user", text)
-
-    @filter.after_event()
-    async def on_bot_response(self, event: AstrMessageEvent, result: MessageEventResult):
-        """记录Bot的回复"""
-        if not isinstance(result, MessageEventResult):
-            return
-        user_id = event.get_sender_id()
-        if not await self.is_user_bound(user_id):
-            return
-        text = self._extract_plain_text(result.get_message())
-        self._append_to_buffer(user_id, "assistant", text)
+        
+        # 兼容版本：在处理用户消息后，等待并捕获机器人回复
+        async def capture_bot_reply():
+            try:
+                # 等待短暂时间让机器人生成回复
+                await asyncio.sleep(1)
+                # 获取机器人最新回复（兼容v4.14.2的方式）
+                # 如果这个方式也不生效，可以根据实际的API调整
+                reply_result = event.get_reply_result()
+                if reply_result and isinstance(reply_result, MessageEventResult):
+                    reply_text = self._extract_plain_text(reply_result.get_message())
+                    self._append_to_buffer(user_id, "assistant", reply_text)
+            except Exception as e:
+                logger.warning(f"捕获机器人回复失败: {e}")
+        
+        # 异步执行，不阻塞主流程
+        asyncio.create_task(capture_bot_reply())
 
     async def terminate(self):
         if self.scheduler_task:
