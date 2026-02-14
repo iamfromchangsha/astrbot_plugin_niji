@@ -1,6 +1,33 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+# 插件元数据 (metadata.yaml)
+name: astrbot_plugin_niji
+display_name: Niji Diary Logger
+author: iamfromchangsha
+description: 自动将用户与AI的完整对话记录上传至'你的日记'（https://nijiweb.cn）
+version: "1.0.0"
+license: MIT
+
+# 最低 AstrBot 版本要求
+astrbot_version: ">=4.9.2"
+
+# Python 依赖（等同于 requirements.txt）
+dependencies:
+  - aiohttp>=3.8.0
+
+# 支持的平台（可选，留空表示不限）
+platforms: []
+
+# 标签（用于分类）
+tags:
+  - diary
+  - backup
+  - niji
+  - auto-save
+
+# 主入口文件（通常为 main.py）
+main: main.py
+
+# 是否启用 KV 存储（本插件使用了 put_kv_data / get_kv_data）
+use_kv_store: true
+
+# 是否需要网络权限
+requires_network: true
