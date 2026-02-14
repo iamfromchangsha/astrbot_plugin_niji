@@ -168,6 +168,8 @@ for diary_card in diary_card_data:
 print(check)
 if check:
     diary_content=get_diary(token,user_id,diaryid,user_id).get("content")
+    print(diary_content)
+    
     
 
 
