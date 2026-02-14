@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional, Tuple
 @register(
     name="niji_diary_logger",
     author="iamfromchangsha",
-    description="自动将用户与AI的完整对话记录上传至'你的日记'",
     version="1.0.0",
 )
 class NijiDiaryLoggerPlugin(Star):
