@@ -50,7 +50,7 @@ def compare_date_str(date_str1, date_str2, format_str="%Y-%m-%d"):
 
 
 
-def post_diary(token,title,content,id):
+def post_diary(token,title,content,id,datatext):
     url = "https://nijiweb.cn/api/"
     headers = {
         "Cookie":"token="+token,
@@ -59,7 +59,7 @@ def post_diary(token,title,content,id):
     }
     data={
         "function":"writeDiary",
-        "dateText":"2026-02-14",
+        "dateText":datatext,
         "titleText":title,
         "contentText":content,
         "id":id
@@ -155,7 +155,7 @@ def get_userid_and_diarycard(token):
    
 
 curent_time = get_current_date_str()
-token=login("2212831947@qq.com","89937.7374")
+token=login("","")
 user_id, diary_card_data = get_userid_and_diarycard(token)
 check = False
 createdate = None
@@ -168,8 +168,13 @@ for diary_card in diary_card_data:
 print(check)
 if check:
     diary_content=get_diary(token,user_id,diaryid,user_id).get("content")
-    print(diary_content)
-    
+    newdiary_content = diary_content + "\n\n" + "astrobot的放在后面"
+    fuck = post_diary(token,"测锤子",newdiary_content,diaryid,curent_time)
+    print(fuck)
+else:
+    newdiary_content = "astrobot的放在后面"
+    fuck = post_diary(token,"测锤",newdiary_content,None,curent_time)  
+    print(fuck)  
     
 
 
