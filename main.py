@@ -7,7 +7,6 @@ from astrbot.api.event import (
 )
 from astrbot.api.message_components import (
     Image,
-    MessageSegment,
     Plain,
     Record,
     Video,
@@ -50,7 +49,7 @@ class NijiDiaryLoggerPlugin(Star):
     async def is_user_bound(self, user_id: str) -> bool:
         return await self.get_kv_data(f"niji_token_{user_id}") is not None
 
-    def _extract_plain_text(self, message: List[MessageSegment]) -> str:
+    def _extract_plain_text(self, message: List[Any]) -> str:
         """从消息段中提取纯文本，忽略媒体"""
         parts = []
         for seg in message:
@@ -213,6 +212,7 @@ class NijiDiaryLoggerPlugin(Star):
                 break
             except Exception as e:
                 logger.error(f"调度器错误: {e}")
+
     # ========== 指令与事件监听 ==========
     @filter.command("login")
     async def login_command(self, event: AstrMessageEvent, username: str, password: str):
