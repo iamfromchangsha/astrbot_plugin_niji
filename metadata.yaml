@@ -1,12 +1,4 @@
-name: astrbot_plugin_niji
-display_name: Niji Diary Logger
+name: niji_diary_logger
+version: "1.0.1"
 author: iamfromchangsha
-description: 自动将用户与AI的完整对话记录上传至'你的日记'（https://nijiweb.cn）
-version: "1.0.0"
-license: MIT
-astrbot_version: ">=4.9.2"
-dependencies:
-  - aiohttp>=3.8.0
-use_kv_store: true
-requires_network: true
-main: main.py
+description: 自动将用户消息记录上传至'你的日记'
