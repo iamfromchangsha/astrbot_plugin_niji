@@ -21,9 +21,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 @register(
-    name="niji_diary_logger",
-    author="iamfromchangsha",
-    version="1.0.0",
+    "niji_diary_logger",
+    "自动将用户与AI的完整对话记录上传至'你的日记'",
+    "iamfromchangsha",
+    "1.0.0"
 )
 class NijiDiaryLoggerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
