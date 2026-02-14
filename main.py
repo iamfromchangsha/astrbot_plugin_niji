@@ -27,9 +27,11 @@ from typing import Any, Dict, List, Optional, Tuple
     "1.0.0"
 )
 class NijiDiaryLoggerPlugin(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    # 适配 v4.14.2：移除 config 参数，改为可选参数
+    def __init__(self, context: Context):
         super().__init__(context)
-        self.config = config
+        # 兼容处理：如果后续需要用到 config，从 context 中获取
+        self.config = getattr(context, 'config', None)
         self.session: Optional[aiohttp.ClientSession] = None
         # 升级为对话缓冲区: {user_id: [{"role": "user/assistant", "content": str}, ...]}
         self.conversation_buffer: Dict[str, List[Dict[str, str]]] = {}
@@ -238,9 +240,17 @@ class NijiDiaryLoggerPlugin(Star):
             try:
                 # 等待短暂时间让机器人生成回复
                 await asyncio.sleep(1)
-                # 获取机器人最新回复（兼容v4.14.2的方式）
-                # 如果这个方式也不生效，可以根据实际的API调整
-                reply_result = event.get_reply_result()
+                # 兼容 v4.14.2 获取回复的方式
+                # 如果这个方式不生效，可以尝试直接从 context 获取最新回复
+                try:
+                    # 方式1：尝试从 event 获取回复
+                    reply_result = getattr(event, 'reply_result', None)
+                    if not reply_result:
+                        # 方式2：尝试从上下文获取最新发送的消息
+                        reply_result = self.context.get_latest_bot_message(user_id)
+                except:
+                    reply_result = None
+                    
                 if reply_result and isinstance(reply_result, MessageEventResult):
                     reply_text = self._extract_plain_text(reply_result.get_message())
                     self._append_to_buffer(user_id, "assistant", reply_text)
