@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
     "diary_uploader",
     "自动上传聊天记录到日记插件",
     "iamfromchangsha",
-    "1.0.6"
+    "1.0.7"
 )
 class NijiDiaryLoggerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -240,9 +240,9 @@ class NijiDiaryLoggerPlugin(Star):
             del self.conversation_buffer[user_id]
         yield event.plain_result("✅ 解绑成功！\n" "已停止记录对话并删除绑定信息。")
 
-    @filter.event_message_type(filter.EventMessageType.MESSAGE)
-    async def on_user_message(self, event: AstrMessageEvent):
-        """记录用户消息"""
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_all_message(self, event: AstrMessageEvent):
+        """记录所有消息"""
         user_id = event.get_sender_id()
         if not await self.is_user_bound(user_id):
             return
@@ -256,23 +256,14 @@ class NijiDiaryLoggerPlugin(Star):
         if event.message_str.startswith("/"):
             return
 
-        # 添加到缓冲区
-        self._append_to_buffer(user_id, "user", text)
-
-    @filter.event_message_type(filter.EventMessageType.RESPONSE)
-    async def on_ai_response(self, event: AstrMessageEvent):
-        """记录AI回复"""
-        user_id = event.get_sender_id()
-        if not await self.is_user_bound(user_id):
-            return
-        
-        # 提取文本内容
-        text = self._extract_plain_text(event.get_message())
-        if not text:
-            return
+        # 确定消息类型
+        if hasattr(event, 'message_type') and event.message_type == 'response':
+            role = "ai"
+        else:
+            role = "user"
 
         # 添加到缓冲区
-        self._append_to_buffer(user_id, "ai", text)
+        self._append_to_buffer(user_id, role, text)
 
     async def terminate(self):
         if self.scheduler_task:
