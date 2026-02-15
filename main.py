@@ -1,4 +1,5 @@
 from astrbot import logger
+from astrbot.api import AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
@@ -14,31 +15,33 @@ from typing import Any, Dict, List, Optional, Tuple
     "diary_uploader",
     "自动上传聊天记录到日记插件",
     "iamfromchangsha",
-    "1.0.5"
+    "1.0.6"
 )
 class NijiDiaryLoggerPlugin(Star):
-    def __init__(self, context, config):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.session = None
-        self.conversation_buffer = {}
-        self.scheduler_task = None
+        self.config = config
+        self.session: Optional[aiohttp.ClientSession] = None
+        # 对话缓冲区: {user_id: {"YYYY-MM-DD": [{"role": "user/ai", "content": "message"}]}}
+        self.conversation_buffer: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
+        self.scheduler_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         self.session = aiohttp.ClientSession()
         self.scheduler_task = asyncio.create_task(self._daily_scheduler())
-        logger.info("Niji Diary Logger (v1.0.5) 已启动，开始记录对话。")
+        logger.info("Niji Diary Logger (v1.0.6) 已启动，开始记录对话。")
 
-    def _get_beijing_time(self):
+    def _get_beijing_time(self) -> datetime:
         return datetime.now(timezone(timedelta(hours=8)))
 
-    def _get_current_date_str(self):
+    def _get_current_date_str(self) -> str:
         return self._get_beijing_time().strftime("%Y-%m-%d")
 
-    async def is_user_bound(self, user_id):
+    async def is_user_bound(self, user_id: str) -> bool:
         """检查用户是否已绑定"""
         return await self.get_kv_data(f"niji_token_{user_id}") is not None
 
-    def _extract_plain_text(self, message):
+    def _extract_plain_text(self, message: List[Any]) -> str:
         """从消息段中提取纯文本，忽略媒体"""
         parts = []
         for seg in message:
@@ -46,7 +49,7 @@ class NijiDiaryLoggerPlugin(Star):
                 parts.append(seg.text.strip())
         return " ".join(parts).strip()
 
-    def _append_to_buffer(self, user_id, role, content):
+    def _append_to_buffer(self, user_id: str, role: str, content: str):
         """将消息追加到缓冲区"""
         if not content:
             return
@@ -58,7 +61,7 @@ class NijiDiaryLoggerPlugin(Star):
         self.conversation_buffer[user_id][current_date].append({"role": role, "content": content})
 
     # ========== 「你的日记」API 操作 ==========
-    async def _login(self, username, password):
+    async def _login(self, username: str, password: str) -> Optional[str]:
         url = "https://nijiweb.cn/api/login/"
         headers = {
             "content-type": "application/x-www-form-urlencoded",
@@ -74,7 +77,7 @@ class NijiDiaryLoggerPlugin(Star):
             logger.error(f"登录失败: {e}")
             return None
 
-    async def _get_user_info_and_diaries(self, token):
+    async def _get_user_info_and_diaries(self, token: str) -> Tuple[Optional[str], list]:
         url = "https://nijiweb.cn/"
         headers = {"Cookie": f"token={token}"}
         try:
@@ -94,7 +97,9 @@ class NijiDiaryLoggerPlugin(Star):
             logger.error(f"获取日记列表失败: {e}")
             return None, []
 
-    async def _get_diary_content(self, token, owner_id, diary_id, user_id):
+    async def _get_diary_content(
+        self, token: str, owner_id: str, diary_id: str, user_id: str
+    ) -> Optional[str]:
         url = "https://nijiweb.cn/api/"
         headers = {
             "Cookie": f"token={token}",
@@ -114,7 +119,9 @@ class NijiDiaryLoggerPlugin(Star):
             logger.error(f"获取日记内容失败: {e}")
             return None
 
-    async def _post_diary(self, token, title, content, diary_id):
+    async def _post_diary(
+        self, token: str, title: str, content: str, diary_id: Optional[str]
+    ) -> bool:
         url = "https://nijiweb.cn/api/"
         headers = {
             "Cookie": f"token={token}",
@@ -135,7 +142,7 @@ class NijiDiaryLoggerPlugin(Star):
             logger.error(f"发布日记失败: {e}")
             return False
 
-    async def _upload_user_diary(self, user_id):
+    async def _upload_user_diary(self, user_id: str):
         token = await self.get_kv_data(f"niji_token_{user_id}")
         if not token:
             return
