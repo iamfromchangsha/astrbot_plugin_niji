@@ -1,4 +1,3 @@
-# main.py
 from __future__ import annotations
 import asyncio
 import aiohttp
@@ -278,24 +277,15 @@ class NijiDiarySync(Star):
             return []
 
         sources = [
-            ("messages", lambda: getattr(conversation, "messages", None)),
-            # 修复：对 _safe_call 的调用进行 await
-            ("get_messages", lambda: asyncio.run_coroutine_threadsafe(self._safe_call(getattr(conversation, "get_messages", None)), asyncio.get_event_loop()).result() if asyncio.get_event_loop().is_running() else await self._safe_call(getattr(conversation, "get_messages", None))),
-            ("history", lambda: getattr(conversation, "history", None))
+            ("messages", lambda c: getattr(c, "messages", None)),
+            ("get_messages", lambda c: asyncio.run_coroutine_threadsafe(self._safe_call_with_args(getattr(c, "get_messages", None)), asyncio.get_event_loop()).result() if asyncio.get_event_loop().is_running() else asyncio.run(self._safe_call_with_args(getattr(c, "get_messages", None)))),
+            ("history", lambda c: getattr(c, "history", None))
         ]
 
         for source_name, getter in sources:
             try:
-                # 修复：对于异步方法，必须 await
-                if source_name == "get_messages":
-                    # 重新定义 getter 以正确处理异步
-                    method = getattr(conversation, "get_messages", None)
-                    if method and asyncio.iscoroutinefunction(method):
-                         data = await self._safe_call(method)
-                    else:
-                         data = self._safe_call(getattr(conversation, "get_messages", None))
-                else:
-                     data = getter()
+                # 使用 getter 函数获取数据
+                data = getter(conversation)
                 
                 if data:
                     contexts = self._extract_contexts_from_data(data)
@@ -376,13 +366,23 @@ class NijiDiarySync(Star):
 
         return ""
 
-    async def _safe_call(self, func, *args, **kwargs):
+    async def _safe_call_with_args(self, func, *args, **kwargs):
         """安全调用可能是异步的函数"""
         try:
             if func and asyncio.iscoroutinefunction(func):
                 return await func(*args, **kwargs)
             elif func:
                 return func(*args, **kwargs)
+        except Exception:
+            return None
+
+    async def _safe_call(self, func):
+        """安全调用可能是异步的函数，不带额外参数"""
+        try:
+            if func and asyncio.iscoroutinefunction(func):
+                return await func()
+            elif func:
+                return func()
         except Exception:
             return None
     # --- Conversa 方法结束 ---
