@@ -1,4 +1,4 @@
-name: niji_diary_logger
+name: astrbot_plugin_niji
 version: "1.0.1"
 author: iamfromchangsha
 description: 自动将用户消息记录上传至'你的日记'

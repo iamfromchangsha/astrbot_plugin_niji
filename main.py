@@ -8,8 +8,8 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 from typing import Optional, Dict, List
 
-@register("diary_uploader", "豆包", "自动上传聊天记录到日记插件", "1.0.0")
-class DiaryUploaderPlugin(Star):
+@register("astrbot_plugin_niji", "豆包", "自动上传聊天记录到日记插件", "1.0.0")
+class NijiDiaryLoggerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
