@@ -18,11 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
     "1.0.1"
 )
 class NijiDiaryLoggerPlugin(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context):
         super().__init__(context)
-        self.config = config
+        self.config = context.config  # ✅ 正确获取 config 的方式
         self.session: Optional[aiohttp.ClientSession] = None
-        # 对话缓冲区: {user_id: [{"role": "user", "content": str}, ...]}
         self.conversation_buffer: Dict[str, List[Dict[str, str]]] = {}
         self.scheduler_task: Optional[asyncio.Task] = None
 
