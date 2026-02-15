@@ -84,13 +84,13 @@ class NijiUser:
 # 主插件类
 @register("NijiDiarySync", "日记同步助手", "自动将聊天记录同步到你的日记网站。", "1.1.0", "https://github.com/your-name/astrbot_plugin_niji")
 class NijiDiarySync(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context): # 移除了 config 参数
         super().__init__(context)
-        self.cfg: AstrBotConfig = config
+        # self.cfg: AstrBotConfig = config # 移除这一行，因为我们不再接收 config
         self.session: Optional[aiohttp.ClientSession] = None
 
         # 运行时数据
-        self._niji_users: Dict[str, NijiUser] = {} # key: astrbot_user_id
+        self._niji_users: Dict[str, NijiUser] = {}
 
         # 数据文件路径
         if HAS_STARTOOLS:
@@ -98,7 +98,7 @@ class NijiDiarySync(Star):
             self._data_dir = str(data_dir_path)
             os.makedirs(self._data_dir, exist_ok=True)
         else:
-            root = os.getcwd()
+            root = os.getcwd() # 使用当前工作目录作为根目录
             self._data_dir = _ensure_dir(os.path.join(root, "data", "plugin_data", "astrbot_plugin_niji"))
 
         self._data_file_path = os.path.join(self._data_dir, "niji_users.json")
