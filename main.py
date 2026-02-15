@@ -11,7 +11,7 @@ from typing import Optional, Dict, List
 @register("astrbot_plugin_niji", "豆包", "自动上传聊天记录到日记插件", "1.0.0")
 class NijiDiaryLoggerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
-        super().__init__(context)
+        super().__init__(context, config)
         self.config = config
         # 存储用户的登录信息，key是用户id，value是{"username": "", "password": "", "token": ""}
         self.user_data: Dict[str, Dict] = {}
