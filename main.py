@@ -15,12 +15,11 @@ from typing import Any, Dict, List, Optional, Tuple
     "diary_uploader",
     "自动上传聊天记录到日记插件",
     "iamfromchangsha",
-    "1.0.2"
+    "1.0.3"
 )
-class DiaryUploaderPlugin(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+class NijiDiaryLoggerPlugin(Star):
+    def __init__(self, context: Context):
         super().__init__(context)
-        self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
         # 对话缓冲区: {user_id: {"YYYY-MM-DD": [{"role": "user/ai", "content": "message"}]}}
         self.conversation_buffer: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
