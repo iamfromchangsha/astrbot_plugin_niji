@@ -14,22 +14,22 @@ from typing import Any, Dict, List, Optional, Tuple
 @register(
     "diary_uploader",
     "自动上传聊天记录到日记插件",
-    "豆包",
-    "1.0.1"
+    "iamfromchangsha",
+    "1.0.2"
 )
 class DiaryUploaderPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
-        # 对话缓冲区: {user_id: [{"date": "YYYY-MM-DD", "records": ["msg1", "msg2"]}, ...]}
-        self.conversation_buffer: Dict[str, Dict[str, List[str]]] = {}
+        # 对话缓冲区: {user_id: {"YYYY-MM-DD": [{"role": "user/ai", "content": "message"}]}}
+        self.conversation_buffer: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
         self.scheduler_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         self.session = aiohttp.ClientSession()
         self.scheduler_task = asyncio.create_task(self._daily_scheduler())
-        logger.info("DiaryUploaderPlugin (v1.0.1) 已启动，记录用户消息。")
+        logger.info("Niji Diary Logger (v1.0.2) 已启动，开始记录对话。")
 
     def _get_beijing_time(self) -> datetime:
         return datetime.now(timezone(timedelta(hours=8)))
@@ -49,7 +49,7 @@ class DiaryUploaderPlugin(Star):
                 parts.append(seg.text.strip())
         return " ".join(parts).strip()
 
-    def _append_to_buffer(self, user_id: str, content: str):
+    def _append_to_buffer(self, user_id: str, role: str, content: str):
         """将消息追加到缓冲区"""
         if not content:
             return
@@ -58,7 +58,7 @@ class DiaryUploaderPlugin(Star):
             self.conversation_buffer[user_id] = {}
         if current_date not in self.conversation_buffer[user_id]:
             self.conversation_buffer[user_id][current_date] = []
-        self.conversation_buffer[user_id][current_date].append(content)
+        self.conversation_buffer[user_id][current_date].append({"role": role, "content": content})
 
     # ========== 「你的日记」API 操作 ==========
     async def _login(self, username: str, password: str) -> Optional[str]:
@@ -150,20 +150,23 @@ class DiaryUploaderPlugin(Star):
         current_date = self._get_current_date_str()
         daily_records = self.conversation_buffer.get(user_id, {}).get(current_date, [])
         if not daily_records:
-            logger.debug(f"用户 {user_id} 今日无消息，跳过上传。")
+            logger.debug(f"用户 {user_id} 今日无对话，跳过上传。")
             return
 
         # 格式化为可读对话
-        formatted_lines = [f"👤 {msg}" for msg in daily_records]
+        formatted_lines = []
+        for record in daily_records:
+            prefix = "👤 " if record["role"] == "user" else "🤖 "
+            formatted_lines.append(f"{prefix}{record['content']}")
         new_content = "\n".join(formatted_lines).strip()
 
-        title = f"用户消息记录 - {current_date}"
+        title = f"AI对话记录 - {current_date}"
 
         # 检查是否已有当天日记
         _, cards = await self._get_user_info_and_diaries(token)
         existing_id = None
         for card in cards:
-            if str(card.get("cardUserID")) == user_id and card.get("createdDate") == current_date:
+            if card.get("createdDate") == current_date:
                 existing_id = card.get("cardDiaryId")
                 break
 
@@ -174,25 +177,26 @@ class DiaryUploaderPlugin(Star):
                 final_content = old_content + "\n\n---\n" + new_content
 
         if await self._post_diary(token, title, final_content, existing_id):
-            logger.info(f"成功上传用户 {user_id} 的消息记录。")
+            logger.info(f"成功上传用户 {user_id} 的对话记录。")
             # 清空当日记录
             if user_id in self.conversation_buffer and current_date in self.conversation_buffer[user_id]:
                 self.conversation_buffer[user_id][current_date] = []
         else:
-            logger.error(f"上传失败: {user_id}")
+            logger.error(f"上传失败: {user_id}，数据将保留至次日重试。")
 
     async def _daily_scheduler(self):
-        """每天北京时间 23:55 触发上传"""
+        """每天北京时间 23:50 触发上传"""
         while True:
             try:
                 now = self._get_beijing_time()
-                today_2355 = now.replace(hour=23, minute=55, second=0, microsecond=0)
-                if now > today_2355:
-                    next_run = today_2355 + timedelta(days=1)
+                today_2350 = now.replace(hour=23, minute=50, second=0, microsecond=0)
+                if now > today_2350:
+                    next_run = today_2350 + timedelta(days=1)
                 else:
-                    next_run = today_2355
+                    next_run = today_2350
 
                 sleep_seconds = (next_run - now).total_seconds()
+                logger.info(f"下次上传时间: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
                 await asyncio.sleep(sleep_seconds)
 
                 all_keys = await self.get_all_kv_keys()
@@ -221,15 +225,24 @@ class DiaryUploaderPlugin(Star):
                 self.conversation_buffer[user_id] = {}
             yield event.plain_result(
                 "✅ 绑定成功！\n"
-                "📌 注意：当前仅记录您发送的消息（不含AI回复）。\n"
-                "⏰ 每日 23:55 自动同步至'你的日记'。"
+                "📌 已开始记录您与AI的完整对话。\n"
+                "⏰ 每日 23:50 自动同步至'你的日记'。"
             )
         else:
             yield event.plain_result("❌ 绑定失败，请检查账号密码。")
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.command("logout")
+    async def logout_command(self, event: AstrMessageEvent):
+        user_id = event.get_sender_id()
+        await self.put_kv_data(f"niji_token_{user_id}", None)
+        # 清理缓冲区
+        if user_id in self.conversation_buffer:
+            del self.conversation_buffer[user_id]
+        yield event.plain_result("✅ 解绑成功！\n" "已停止记录对话并删除绑定信息。")
+
+    @filter.event_message_type(filter.EventMessageType.MESSAGE)
     async def on_user_message(self, event: AstrMessageEvent):
-        """仅记录用户消息（v4 限制）"""
+        """记录用户消息"""
         user_id = event.get_sender_id()
         if not await self.is_user_bound(user_id):
             return
@@ -244,7 +257,22 @@ class DiaryUploaderPlugin(Star):
             return
 
         # 添加到缓冲区
-        self._append_to_buffer(user_id, text)
+        self._append_to_buffer(user_id, "user", text)
+
+    @filter.event_message_type(filter.EventMessageType.RESPONSE)
+    async def on_ai_response(self, event: AstrMessageEvent):
+        """记录AI回复"""
+        user_id = event.get_sender_id()
+        if not await self.is_user_bound(user_id):
+            return
+        
+        # 提取文本内容
+        text = self._extract_plain_text(event.get_message())
+        if not text:
+            return
+
+        # 添加到缓冲区
+        self._append_to_buffer(user_id, "ai", text)
 
     async def terminate(self):
         if self.scheduler_task:
@@ -255,4 +283,4 @@ class DiaryUploaderPlugin(Star):
                 pass
         if self.session:
             await self.session.close()
-        logger.info("DiaryUploaderPlugin 已停止。")
+        logger.info("Niji Diary Logger 已停止。")
