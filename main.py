@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
     "diary_uploader",
     "自动上传聊天记录到日记插件",
     "iamfromchangsha",
-    "1.0.9"
+    "1.0.10"
 )
 class NijiDiaryLoggerPlugin(Star):
     def __init__(self, context):
@@ -36,7 +36,7 @@ class NijiDiaryLoggerPlugin(Star):
 
     async def is_user_bound(self, user_id):
         """检查用户是否已绑定"""
-        return await self.get_kv_data(f"niji_token_{user_id}") is not None
+        return await self.get_kv_data(f"niji_token_{user_id}", default=None) is not None
 
     def _extract_plain_text(self, message):
         """从消息段中提取纯文本，忽略媒体"""
@@ -136,7 +136,7 @@ class NijiDiaryLoggerPlugin(Star):
             return False
 
     async def _upload_user_diary(self, user_id):
-        token = await self.get_kv_data(f"niji_token_{user_id}")
+        token = await self.get_kv_data(f"niji_token_{user_id}", default=None)
         if not token:
             return
 
