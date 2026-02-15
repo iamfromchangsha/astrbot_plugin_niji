@@ -1,6 +1,6 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+from astrbot.api import logger, AstrBotConfig
 import aiohttp
 import re
 import json
@@ -10,8 +10,9 @@ from typing import Optional, Dict, List
 
 @register("diary_uploader", "豆包", "自动上传聊天记录到日记插件", "1.0.0")
 class DiaryUploaderPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
+        self.config = config
         # 存储用户的登录信息，key是用户id，value是{"username": "", "password": "", "token": ""}
         self.user_data: Dict[str, Dict] = {}
         # 聊天记录存储，key是用户id，value是{"date": "yyyy-mm-dd", "records": []}
