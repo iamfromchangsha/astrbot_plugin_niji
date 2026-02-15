@@ -15,10 +15,10 @@ from typing import Any, Dict, List, Optional, Tuple
     "diary_uploader",
     "自动上传聊天记录到日记插件",
     "iamfromchangsha",
-    "1.0.3"
+    "1.0.4"
 )
 class NijiDiaryLoggerPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config):
         super().__init__(context)
         self.session: Optional[aiohttp.ClientSession] = None
         # 对话缓冲区: {user_id: {"YYYY-MM-DD": [{"role": "user/ai", "content": "message"}]}}
