@@ -437,8 +437,9 @@ class NijiDiarySync(Star):
             logger.error(f"[NijiDiarySync] Unexpected error getting user info: {e}")
             return None, []
 
+    # 修改后的 _get_diary：先获取文本再手动解析 JSON
     async def _get_diary(self, token: str, owner_id: str, diary_id: str, user_id: str) -> Optional[dict]:
-        """获取指定日记内容"""
+        """获取指定日记内容（兼容错误的 Content-Type）"""
         url = "https://nijiweb.cn/api/"
         headers = {"Cookie": f"token={token}"}
         data = {
@@ -450,11 +451,12 @@ class NijiDiarySync(Star):
         try:
             async with self.session.post(url, headers=headers, data=data) as response:
                 if response.status == 200:
+                    text = await response.text()
                     try:
-                        json_resp = await response.json()
+                        json_resp = json.loads(text)
                         return json_resp
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                        logger.error(f"[NijiDiarySync] Get diary response not JSON: {e}. Body: {await response.text()[:500]}")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"[NijiDiarySync] Get diary response not valid JSON: {e}. Body: {text[:500]}")
                         return None
                 else:
                     text = await response.text()
@@ -467,8 +469,9 @@ class NijiDiarySync(Star):
             logger.error(f"[NijiDiarySync] Unexpected error getting diary: {e}")
             return None
 
+    # 修改后的 _post_diary：先获取文本再手动解析 JSON
     async def _post_diary(self, token: str, title: str, content: str, diary_id: Optional[str], date_text: str) -> bool:
-        """发布或更新日记"""
+        """发布或更新日记（兼容错误的 Content-Type）"""
         url = "https://nijiweb.cn/api/"
         headers = {"Cookie": f"token={token}"}
         data = {
@@ -481,15 +484,16 @@ class NijiDiarySync(Star):
         try:
             async with self.session.post(url, headers=headers, data=data) as response:
                 if response.status == 200:
+                    text = await response.text()
                     try:
-                        json_resp = await response.json()
-                        success_status = json_resp.get("status") == "success"
-                        logger.info(f"[NijiDiarySync] Post diary response JSON: {json_resp}")
-                        return success_status
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                        text = await response.text()
-                        logger.error(f"[NijiDiarySync] Post diary response not JSON: {e}. Body: {text[:500]}")
+                        json_resp = json.loads(text)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"[NijiDiarySync] Post diary response is not valid JSON: {e}. Body: {text[:500]}")
                         return False
+
+                    success_status = json_resp.get("status") == "success"
+                    logger.info(f"[NijiDiarySync] Post diary response JSON: {json_resp}")
+                    return success_status
                 else:
                     text = await response.text()
                     logger.error(f"[NijiDiarySync] Post diary failed with status {response.status}. Preview: {text[:200]}...")
