@@ -2,6 +2,8 @@
 
 自动将你与 AI 的聊天记录同步到 [你的日记](https://nijiweb.cn) 网站，支持每日自动上传和手动触发同步，打造属于你的私人 AI 对话存档。
 
+
+![统计访问](http://moe.xn--estn41aqtae4v.xyz/@astrbot_plugin_niji?name=astrbot_plugin_niji&theme=random&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
 ## ✨ 核心功能
 
 - **自动同步**：每天北京时间 23:50 自动上传当日聊天记录
