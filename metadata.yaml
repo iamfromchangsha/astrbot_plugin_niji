@@ -1,11 +1,13 @@
 name: "astrbot_plugin_niji"
-display_name: "📖 Niji Diary Logger"
-desc: "自动将你与 AI 的完整对话记录（用户消息 + AI 回复）每日同步至 你的日记 网站，打造属于你的私人 AI 对话存档。\n\n"
-version: "1.0.0"
+display_name: "Niji Diary Sync"
+desc: "自动将聊天记录同步到你的日记网站，支持每日自动上传和手动触发同步。"
+version: "1.4.0"
 author: "iamfromchangsha"
 repo: "https://github.com/iamfromchangsha/astrbot_plugin_niji"
 tags: [
   "你的日记",
-  "对话保存"
+  "对话保存",
+  "自动同步",
+  "聊天记录"
 ]
 social_link: "https://github.com/iamfromchangsha"
