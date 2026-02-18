@@ -6,8 +6,8 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-from astrbot.api import logger, AstrBotConfig
+from typing import Dict, List, Optional, Tuple
+from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 
@@ -37,34 +37,21 @@ def _fmt_date(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
-def _compare_date_str(date_str1: str, date_str2: str, format_str: str = "%Y-%m-%d") -> Optional[int]:
-    """比较两个日期字符串。返回 1, 0, -1。如果任一日期无效，则返回 None."""
-    try:
-        date1 = datetime.strptime(date_str1, format_str).date()
-        date2 = datetime.strptime(date_str2, format_str).date()
-        if date1 > date2:
-            return 1
-        elif date1 < date2:
-            return -1
-        else:
-            return 0
-    except ValueError:
-        return None
-
-
 # ---------- 用户数据类 ----------
 @dataclass
 class NijiUser:
     """存储日记用户凭据和状态"""
     token: str
     user_id: str
-    last_uploaded_date: str = ""  # 格式: YYYY-MM-DD
+    last_uploaded_date: str = ""          # 格式: YYYY-MM-DD，用于标记当天是否已检查
+    last_message_count: int = 0            # 上次上传时的消息总数，用于增量判断
 
     def to_dict(self):
         return {
             "token": self.token,
             "user_id": self.user_id,
             "last_uploaded_date": self.last_uploaded_date,
+            "last_message_count": self.last_message_count,
         }
 
     @classmethod
@@ -73,11 +60,12 @@ class NijiUser:
             token=data.get("token", ""),
             user_id=data.get("user_id", ""),
             last_uploaded_date=data.get("last_uploaded_date", ""),
+            last_message_count=data.get("last_message_count", 0),
         )
 
 
 # ---------- 主插件类 ----------
-@register("NijiDiarySync", "日记同步助手", "自动将聊天记录同步到你的日记网站。", "1.3.0", "https://github.com/your-name/astrbot_plugin_niji")
+@register("NijiDiarySync", "日记同步助手", "自动将聊天记录同步到你的日记网站。", "1.4.0", "https://github.com/your-name/astrbot_plugin_niji")
 class NijiDiarySync(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -111,7 +99,6 @@ class NijiDiarySync(Star):
         self._upload_task = asyncio.create_task(self._periodic_upload_loop())
 
         logger.info("[NijiDiarySync] Plugin initialized.")
-        # 提醒用户注意数据文件权限（敏感信息存储）
         logger.warning("[NijiDiarySync] User tokens are stored in plain text. Please ensure the data file permissions are secure (e.g., 600).")
 
     async def terminate(self):
@@ -146,15 +133,17 @@ class NijiDiarySync(Star):
             logger.error(f"[NijiDiarySync] Failed to read data file: {e}")
 
     def _save_data(self):
-        """保存用户数据到文件"""
         try:
             data = {uid: user.to_dict() for uid, user in self._niji_users.items()}
             with open(self._data_file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
+            logger.debug(f"[NijiDiarySync] Data saved to {self._data_file_path}")
         except (IOError, OSError) as e:
             logger.error(f"[NijiDiarySync] Failed to write data file: {e}")
         except (TypeError, ValueError) as e:
             logger.error(f"[NijiDiarySync] Failed to serialize data: {e}")
+        except Exception as e:
+            logger.error(f"[NijiDiarySync] Unexpected error saving data: {e}")
 
     # ---------- 后台循环 ----------
     async def _periodic_upload_loop(self):
@@ -200,48 +189,77 @@ class NijiDiarySync(Star):
                     logger.error(f"[NijiDiarySync] Error uploading for user {user_id}: {result}")
 
     async def _upload_for_single_user(self, niji_user: NijiUser, astrbot_user_id: str, today_str: str, semaphore: asyncio.Semaphore):
-        """为单个用户执行上传，使用信号量控制并发"""
+        """为单个用户执行增量上传，使用信号量控制并发"""
         async with semaphore:
             try:
-                if niji_user.last_uploaded_date != today_str:
-                    logger.info(f"[NijiDiarySync] Preparing to upload log for {astrbot_user_id} (last upload: {niji_user.last_uploaded_date})")
-                    full_history_text = await self._get_full_conversation_history(astrbot_user_id)
-                    if not full_history_text.strip():
-                        logger.info(f"[NijiDiarySync] No history to upload for {astrbot_user_id}, skipping.")
-                        return
-                    success = await self._upload_chat_log(niji_user, today_str, full_history_text)
-                    if success:
-                        niji_user.last_uploaded_date = today_str
-                        self._save_data()
-                        logger.info(f"[NijiDiarySync] Successfully uploaded history for {astrbot_user_id}")
-                    else:
-                        logger.error(f"[NijiDiarySync] Failed to upload history for {astrbot_user_id}")
+                # 如果已经上传过今天，跳过（避免一天内重复执行）
+                if niji_user.last_uploaded_date == today_str:
+                    return
+
+                logger.info(f"[NijiDiarySync] Preparing to upload log for {astrbot_user_id} (last count: {niji_user.last_message_count})")
+
+                # 执行实际的增量上传
+                success = await self._do_incremental_upload(niji_user, astrbot_user_id, today_str)
+
+                if success:
+                    logger.info(f"[NijiDiarySync] Successfully uploaded new messages for {astrbot_user_id}")
+                else:
+                    logger.error(f"[NijiDiarySync] Failed to upload new messages for {astrbot_user_id}")
             except Exception as e:
                 logger.error(f"[NijiDiarySync] Error processing user {astrbot_user_id}: {e}")
 
-    # ---------- 获取聊天历史 ----------
-    async def _get_full_conversation_history(self, umo: str) -> str:
-        """安全获取完整上下文历史"""
-        contexts = await self._safe_get_full_contexts(umo)
-        if not contexts:
-            return ""
+    async def _do_incremental_upload(self, niji_user: NijiUser, astrbot_user_id: str, today_str: str) -> bool:
+        try:
+            all_messages = await self._safe_get_full_contexts(astrbot_user_id)
+            if not isinstance(all_messages, list):
+                logger.error(f"[NijiDiarySync] _safe_get_full_contexts returned non-list: {type(all_messages)}. Using empty list.")
+                all_messages = []
+            total_count = len(all_messages)
+            logger.info(f"[DEBUG] total_count={total_count}, last_message_count={niji_user.last_message_count}")
 
-        history_lines = []
-        for msg in contexts:
-            role = msg.get("role", "unknown")
-            content_obj = msg.get("content", "")
-            content_text = self._extract_content_text({"content": content_obj})
-            if content_text:
-                display_role = "User" if role == "user" else "Bot" if role == "assistant" else role.capitalize()
-                history_lines.append(f"[{display_role}] {content_text}")
+            list_is_descending = False  # 根据实际顺序调整
 
-        return "\n".join(history_lines)
+            if list_is_descending:
+                if total_count > niji_user.last_message_count:
+                    new_count = total_count - niji_user.last_message_count
+                    new_messages = all_messages[:new_count]
+                else:
+                    new_messages = []
+            else:
+                start_idx = niji_user.last_message_count
+                if start_idx > total_count:
+                    logger.warning(f"[NijiDiarySync] Stored message count {start_idx} > current total {total_count}, resetting to 0.")
+                    start_idx = 0
+                new_messages = all_messages[start_idx:]
 
+            if not new_messages:
+                logger.info(f"[NijiDiarySync] No new messages for {astrbot_user_id} (count {niji_user.last_message_count}).")
+                niji_user.last_uploaded_date = today_str
+                self._save_data()
+                return True
+
+            new_text = self._format_messages_to_text(new_messages)
+            success = await self._upload_chat_log(niji_user, today_str, new_text)
+
+            if success:
+                logger.info(f"[NijiDiarySync] ✅ Upload succeeded for {astrbot_user_id}, updating count from {niji_user.last_message_count} to {total_count}")
+                niji_user.last_message_count = total_count
+                niji_user.last_uploaded_date = today_str
+                self._save_data()
+                logger.info("[NijiDiarySync] Data saved after upload.")
+            else:
+                logger.error(f"[NijiDiarySync] ❌ Upload failed for {astrbot_user_id}, count not updated.")
+            return success
+        except Exception as e:
+            logger.error(f"[NijiDiarySync] Exception in _do_incremental_upload: {e}")
+            return False
+
+    # ---------- 消息处理 ----------
     async def _safe_get_full_contexts(self, umo: str) -> List[Dict]:
         """安全获取完整上下文，使用多重降级策略确保稳定性"""
         contexts = await self._try_get_from_manager(umo)
         if contexts:
-            logger.debug(f"[NijiDiarySync] ✅ Got {len(contexts)} messages")
+            logger.info(f"[NijiDiarySync] ✅ Got {len(contexts)} messages")
             return contexts
         logger.warning(f"[NijiDiarySync] ⚠️ Could not fetch history for {umo}, returning empty.")
         return []
@@ -324,6 +342,12 @@ class NijiDiarySync(Star):
         """标准化消息格式，兼容多种数据源"""
         if not msgs:
             return []
+        # 调试打印（改为 info 以便看到）
+        if isinstance(msgs, list) and len(msgs) > 0:
+            first_msg = msgs[0]
+            logger.info(f"[DEBUG] 第一条消息的全部键: {first_msg.keys()}")
+            content_preview = str(first_msg).replace('\n', ' ')[:200]
+            logger.info(f"[DEBUG] 第一条消息预览: {content_preview}")
 
         if isinstance(msgs, dict) and "messages" in msgs:
             msgs = msgs["messages"]
@@ -341,9 +365,13 @@ class NijiDiarySync(Star):
                 continue
 
             content = self._extract_content_text(msg)
+            if not content:
+                continue
 
-            if content:
-                normalized.append({"role": role, "content": content.strip()})
+            normalized.append({
+                "role": role,
+                "content": content.strip()
+            })
 
         return normalized
 
@@ -370,6 +398,17 @@ class NijiDiarySync(Star):
             return fallback
 
         return ""
+
+    def _format_messages_to_text(self, messages: List[Dict]) -> str:
+        """将消息列表格式化为纯文本，供上传使用"""
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if content:
+                display_role = "User" if role == "user" else "Bot" if role == "assistant" else role.capitalize()
+                lines.append(f"[{display_role}] {content}")
+        return "\n".join(lines)
 
     # ---------- 日记网站 API ----------
     async def _login(self, username: str, password: str) -> Tuple[Optional[str], Optional[str]]:
@@ -402,31 +441,32 @@ class NijiDiarySync(Star):
             return None, None
 
     async def _get_userid_and_diarycard(self, token: str) -> Tuple[Optional[str], list]:
-        """获取用户ID和日记卡片列表（增加宽松正则）"""
+        """获取用户ID和日记卡片列表（解析HTML中的addDiaryCard调用）"""
         url = "https://nijiweb.cn/"
         headers = {"Cookie": f"token={token}"}
         try:
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html_content = await response.text()
-                    # 更宽松的正则，允许空格
+                    # 提取用户ID
                     userid_match = re.search(r"setUserId\s*\(\s*(\d+)\s*\)", html_content)
                     user_id = userid_match.group(1) if userid_match else None
                     if not user_id:
                         logger.warning("[NijiDiarySync] Could not extract user ID from HTML, maybe the site structure changed.")
 
+                    # 提取所有日记卡片
                     diary_pattern = r"addDiaryCard\s*\(\s*(\{[^}]*\})\s*\)"
                     diary_matches = re.findall(diary_pattern, html_content)
-                    diary_cards_data = []
+                    diary_cards = []
                     for json_str in diary_matches:
                         clean_json_str = json_str.replace("'", '"')
                         try:
-                            diary_data = json.loads(clean_json_str)
-                            diary_cards_data.append(diary_data)
+                            card_data = json.loads(clean_json_str)
+                            diary_cards.append(card_data)
                         except json.JSONDecodeError as e:
                             logger.error(f"[NijiDiarySync] Single diary card JSON parse error: {e}, raw: {json_str}")
                             continue
-                    return user_id, diary_cards_data
+                    return user_id, diary_cards
                 else:
                     logger.error(f"[NijiDiarySync] Get user info failed with status {response.status}.")
                     return None, []
@@ -437,38 +477,15 @@ class NijiDiarySync(Star):
             logger.error(f"[NijiDiarySync] Unexpected error getting user info: {e}")
             return None, []
 
-    async def _get_diary(self, token: str, owner_id: str, diary_id: str, user_id: str) -> Optional[dict]:
-        """获取指定日记内容"""
-        url = "https://nijiweb.cn/api/"
-        headers = {"Cookie": f"token={token}"}
-        data = {
-            "function": "getDiary",
-            "ownerId": owner_id,
-            "diaryId": diary_id,
-            "userId": user_id
-        }
-        try:
-            async with self.session.post(url, headers=headers, data=data) as response:
-                if response.status == 200:
-                    try:
-                        json_resp = await response.json()
-                        return json_resp
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                        logger.error(f"[NijiDiarySync] Get diary response not JSON: {e}. Body: {await response.text()[:500]}")
-                        return None
-                else:
-                    text = await response.text()
-                    logger.error(f"[NijiDiarySync] Get diary failed with status {response.status}. Preview: {text[:200]}...")
-                    return None
-        except aiohttp.ClientError as e:
-            logger.error(f"[NijiDiarySync] Get diary request failed: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"[NijiDiarySync] Unexpected error getting diary: {e}")
-            return None
+    async def _find_diary_id_by_title(self, token: str, title: str) -> Optional[str]:
+        """根据标题在日记卡片列表中查找对应的日记ID"""
+        _, diary_cards = await self._get_userid_and_diarycard(token)
+        for card in diary_cards:
+            if card.get("title") == title:
+                return card.get("id")
+        return None
 
     async def _post_diary(self, token: str, title: str, content: str, diary_id: Optional[str], date_text: str) -> bool:
-        """发布或更新日记"""
         url = "https://nijiweb.cn/api/"
         headers = {"Cookie": f"token={token}"}
         data = {
@@ -481,15 +498,18 @@ class NijiDiarySync(Star):
         try:
             async with self.session.post(url, headers=headers, data=data) as response:
                 if response.status == 200:
+                    text = await response.text()
                     try:
-                        json_resp = await response.json()
-                        success_status = json_resp.get("status") == "success"
-                        logger.info(f"[NijiDiarySync] Post diary response JSON: {json_resp}")
-                        return success_status
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                        text = await response.text()
-                        logger.error(f"[NijiDiarySync] Post diary response not JSON: {e}. Body: {text[:500]}")
+                        json_resp = json.loads(text)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"[NijiDiarySync] Post diary response is not valid JSON: {e}. Body: {text[:500]}")
                         return False
+
+                    # 修改：忽略大小写判断
+                    status = json_resp.get("status", "")
+                    success_status = isinstance(status, str) and status.lower() == "success"
+                    logger.info(f"[NijiDiarySync] Post diary response JSON: {json_resp}")
+                    return success_status
                 else:
                     text = await response.text()
                     logger.error(f"[NijiDiarySync] Post diary failed with status {response.status}. Preview: {text[:200]}...")
@@ -502,19 +522,21 @@ class NijiDiarySync(Star):
             return False
 
     async def _upload_chat_log(self, niji_user: NijiUser, date_str: str, history_text: str) -> bool:
-        """上传聊天记录到日记（始终创建新日记，避免追加）"""
+        """
+        上传聊天记录到日记（如果当天已有同名日记则更新，否则创建新日记）
+        日记标题格式：Chat Log YYYY-MM-DD
+        """
         if not history_text.strip():
             logger.warning(f"[NijiDiarySync] No history text to upload for user {niji_user.user_id} on {date_str}")
             return True
 
-        # 标题添加具体时间，避免同一天多篇日记覆盖
-        now = _now_beijing()
-        time_str = now.strftime("%H:%M")
-        diary_title = f"Chat Log {date_str} {time_str}"
+        diary_title = f"Chat Log {date_str}"
+        # 查找当天是否已有日记
+        diary_id = await self._find_diary_id_by_title(niji_user.token, diary_title)
+        action = "Updating" if diary_id else "Creating"
+        logger.info(f"[NijiDiarySync] {action} diary entry for {niji_user.user_id} on {date_str}")
 
-        logger.info(f"[NijiDiarySync] Creating new diary entry for {niji_user.user_id} on {date_str} at {time_str}")
-        # 始终不传 diary_id，强制创建新日记
-        return await self._post_diary(niji_user.token, diary_title, history_text, None, date_str)
+        return await self._post_diary(niji_user.token, diary_title, history_text, diary_id, date_str)
 
     # ---------- 事件处理器 ----------
     @filter.command("login")
@@ -534,14 +556,14 @@ class NijiDiarySync(Star):
             astrbot_user_id = event.unified_msg_origin
             self._niji_users[astrbot_user_id] = NijiUser(token=token, user_id=user_id)
             self._save_data()
-            yield event.plain_result("✅ 日记账号绑定成功！聊天记录将自动同步。")
+            yield event.plain_result("✅ 日记账号绑定成功！聊天记录将自动同步（每天仅上传新增内容）。")
             logger.info(f"[NijiDiarySync] User {astrbot_user_id} logged in and bound to diary account {user_id}.")
         else:
             yield event.plain_result("❌ 登录失败，请检查用户名和密码。")
 
     @filter.command("sync")
     async def _cmd_sync(self, event: AstrMessageEvent):
-        """手动触发同步，立即上传今日聊天记录"""
+        """手动触发同步，立即上传今日的新聊天记录（增量）"""
         astrbot_user_id = event.unified_msg_origin
         if astrbot_user_id not in self._niji_users:
             yield event.plain_result("❌ 你尚未绑定日记账号，请先使用 /login 命令绑定。")
@@ -550,29 +572,22 @@ class NijiDiarySync(Star):
         niji_user = self._niji_users[astrbot_user_id]
         today_str = _fmt_date(_now_beijing())
 
-        # 如果今天已上传，询问是否强制再传
+        # 如果今天已经上传过，询问是否强制重新上传（强制上传全部）
         if niji_user.last_uploaded_date == today_str:
-            yield event.plain_result("⚠️ 今天已经自动同步过，是否强制重新上传？(输入 /sync force 确认)")
+            yield event.plain_result("⚠️ 今天已经自动同步过，是否强制重新上传全部历史？(输入 /sync force 确认)")
             return
 
-        # 执行上传
-        yield event.plain_result("🔄 正在获取聊天记录并上传，请稍候...")
-        full_history = await self._get_full_conversation_history(astrbot_user_id)
-        if not full_history.strip():
-            yield event.plain_result("📭 没有找到可上传的聊天记录。")
-            return
-
-        success = await self._upload_chat_log(niji_user, today_str, full_history)
+        # 执行增量上传
+        yield event.plain_result("🔄 正在获取新增聊天记录并上传，请稍候...")
+        success = await self._do_incremental_upload(niji_user, astrbot_user_id, today_str)
         if success:
-            niji_user.last_uploaded_date = today_str
-            self._save_data()
             yield event.plain_result("✅ 手动同步成功！")
         else:
             yield event.plain_result("❌ 手动同步失败，请查看日志。")
 
     @filter.command("sync force")
     async def _cmd_sync_force(self, event: AstrMessageEvent):
-        """强制重新上传今日聊天记录"""
+        """强制重新上传今日聊天记录（上传全部历史，忽略增量）"""
         astrbot_user_id = event.unified_msg_origin
         if astrbot_user_id not in self._niji_users:
             yield event.plain_result("❌ 你尚未绑定日记账号。")
@@ -581,14 +596,16 @@ class NijiDiarySync(Star):
         niji_user = self._niji_users[astrbot_user_id]
         today_str = _fmt_date(_now_beijing())
 
-        yield event.plain_result("🔄 强制同步中...")
-        full_history = await self._get_full_conversation_history(astrbot_user_id)
-        if not full_history.strip():
+        yield event.plain_result("🔄 强制同步中（上传全部历史）...")
+        all_messages = await self._safe_get_full_contexts(astrbot_user_id)
+        if not all_messages:
             yield event.plain_result("📭 没有聊天记录可上传。")
             return
 
-        success = await self._upload_chat_log(niji_user, today_str, full_history)
+        full_text = self._format_messages_to_text(all_messages)
+        success = await self._upload_chat_log(niji_user, today_str, full_text)
         if success:
+            niji_user.last_message_count = len(all_messages)
             niji_user.last_uploaded_date = today_str
             self._save_data()
             yield event.plain_result("✅ 强制同步成功！")
