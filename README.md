@@ -109,7 +109,9 @@ AstrBot 核心模块由主程序提供，无需额外安装。
 ## 📜 许可证
 
 MIT License — 自由使用、修改、分发。
+## Star History
 
+[![Star History Chart](https://api.star-history.com/svg?repos=astrbot_plugin_niji/astrbot_plugin_niji&type=date&legend=top-left)](https://www.star-history.com/#astrbot_plugin_niji/astrbot_plugin_niji&type=date&legend=top-left)
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request 来帮助改进这个插件！
